@@ -7,14 +7,14 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 
-const nav = [
+const nav: { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/tickets", label: "Tickets", icon: Ticket },
   { to: "/chat", label: "Live chat", icon: MessageSquare },
   { to: "/knowledge", label: "Knowledge", icon: BookOpen },
   { to: "/audit", label: "Audit log", icon: ShieldCheck },
   { to: "/integrations", label: "Integrations", icon: Plug },
-] as const;
+];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
