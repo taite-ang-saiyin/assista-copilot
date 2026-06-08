@@ -58,7 +58,7 @@ const QUICK_INTENTS = [
 ];
 
 function ChatDetail() {
-  const { chat } = Route.useLoaderData();
+  const { chat } = Route.useLoaderData() as { chat: typeof liveChats[number] };
   const ai = AI_SUGGESTIONS[chat.id] ?? AI_SUGGESTIONS["CHAT-102"];
   const [composer, setComposer] = useState("");
   const [draft, setDraft] = useState(ai.reply);

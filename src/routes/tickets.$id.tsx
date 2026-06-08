@@ -74,7 +74,7 @@ function CITATIONS_FOR(id: string) {
 }
 
 function TicketDetail() {
-  const { ticket } = Route.useLoaderData();
+  const { ticket } = Route.useLoaderData() as { ticket: typeof tickets[number] };
   const [draft, setDraft] = useState(DRAFTS[ticket.id] ?? "");
   const [edited, setEdited] = useState(false);
   const citations = useMemo(() => CITATIONS_FOR(ticket.id), [ticket.id]);
