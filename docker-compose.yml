@@ -1,0 +1,28 @@
+services:
+  dev:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+  preview:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    ports:
+      - "4173:4173"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    command: sh -c "npm install && npm run build && npm run preview -- --host 0.0.0.0"

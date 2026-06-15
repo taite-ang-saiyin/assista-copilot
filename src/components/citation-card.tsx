@@ -1,9 +1,14 @@
 import { BookOpen, FileText, History } from "lucide-react";
-import type { KnowledgeSource } from "@/lib/mock-data";
+import type { CitationSource } from "@/lib/copilot-types";
 import { cn } from "@/lib/utils";
 
-export function CitationCard({ source, relevance, className }: { source: KnowledgeSource; relevance?: number; className?: string }) {
-  const Icon = source.type === "past_ticket" ? History : source.type === "guide" ? BookOpen : FileText;
+export function CitationCard({ source, relevance, className }: { source: CitationSource; relevance?: number; className?: string }) {
+  const Icon =
+    source.type === "past_ticket"
+      ? History
+      : source.type === "guide"
+        ? BookOpen
+        : FileText;
   return (
     <div className={cn("group rounded-lg border border-border bg-surface p-3 transition hover:border-primary/40 hover:shadow-sm", className)}>
       <div className="flex items-start gap-3">

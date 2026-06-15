@@ -1,3 +1,4 @@
+import { createClientOnlyFn } from "@tanstack/react-start";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -11,6 +12,10 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+
+const loadCustomerBackendClient = createClientOnlyFn(() =>
+  import("../lib/customer-backend.client"),
+);
 
 function NotFoundComponent() {
   return (
@@ -115,6 +120,51 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+
+    void loadCustomerBackendClient()?.then(
+      ({ getSupportDashboardSocket, invalidateSupportRealtimeQueries }) => {
+        const socket = getSupportDashboardSocket();
+        if (!socket) return;
+
+        const joinSupportDashboard = () => {
+          socket.emit("join_support_dashboard");
+        };
+
+        const handleRealtimeChange = () => {
+          void invalidateSupportRealtimeQueries(queryClient);
+        };
+
+        socket.on("connect", joinSupportDashboard);
+        socket.on("new_chat_session", handleRealtimeChange);
+        socket.on("session_claimed", handleRealtimeChange);
+        socket.on("new_ticket", handleRealtimeChange);
+        socket.on("ticket_claimed", handleRealtimeChange);
+        socket.on("ticket_status_updated", handleRealtimeChange);
+        socket.on("ticket_reply", handleRealtimeChange);
+
+        if (!socket.connected) {
+          socket.connect();
+        } else {
+          joinSupportDashboard();
+        }
+
+        cleanup = () => {
+          socket.off("connect", joinSupportDashboard);
+          socket.off("new_chat_session", handleRealtimeChange);
+          socket.off("session_claimed", handleRealtimeChange);
+          socket.off("new_ticket", handleRealtimeChange);
+          socket.off("ticket_claimed", handleRealtimeChange);
+          socket.off("ticket_status_updated", handleRealtimeChange);
+          socket.off("ticket_reply", handleRealtimeChange);
+        };
+      },
+    );
+
+    return () => cleanup?.();
+  }, [queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>

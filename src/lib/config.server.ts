@@ -19,8 +19,16 @@ import process from "node:process";
 export function getServerConfig() {
   return {
     nodeEnv: process.env.NODE_ENV,
-    // Add server-only values here, e.g.:
-    //   databaseUrl: process.env.DATABASE_URL,
-    //   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+    supportBackendBaseUrl:
+      process.env.SUPPORT_BACKEND_BASE_URL ?? process.env.VITE_BACKEND_URL,
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    defaultAgentId: process.env.DEFAULT_AGENT_ID,
+    defaultAgentName: process.env.DEFAULT_AGENT_NAME,
+    member1ApiBaseUrl: process.env.MEMBER1_API_BASE_URL,
+    member2ApiBaseUrl: process.env.MEMBER2_API_BASE_URL,
+    member2ApiKey: process.env.MEMBER2_API_KEY,
+    member3ApiBaseUrl: process.env.MEMBER3_API_BASE_URL,
+    member4ApiBaseUrl: process.env.MEMBER4_API_BASE_URL,
   };
 }

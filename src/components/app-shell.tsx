@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Ticket, MessageSquare, BookOpen, ShieldCheck, Plug,
   Search, Bell, Sparkles,
+  BarChart3,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -12,8 +13,8 @@ const nav: { to: string; label: string; icon: typeof LayoutDashboard; exact?: bo
   { to: "/tickets", label: "Tickets", icon: Ticket },
   { to: "/chat", label: "Live chat", icon: MessageSquare },
   { to: "/knowledge", label: "Knowledge", icon: BookOpen },
-  { to: "/audit", label: "Audit log", icon: ShieldCheck },
-  { to: "/integrations", label: "Integrations", icon: Plug },
+  { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/audit", label: "Audit log", icon: ShieldCheck }
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -61,6 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <p className="text-sidebar-muted">PII masking, audit logging, and human-review gates are enforced.</p>
         </div>
 
+        {/* User profile section 
         <div className="border-t border-sidebar-border px-5 py-3 text-xs text-sidebar-muted">
           <div className="flex items-center gap-2">
             <div className="grid h-7 w-7 place-items-center rounded-full bg-sidebar-accent text-[11px] font-semibold text-sidebar-foreground">RM</div>
@@ -69,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div>Senior Support Engineer</div>
             </div>
           </div>
-        </div>
+        </div>*/}
       </aside>
 
       <div className="flex min-h-screen flex-col">

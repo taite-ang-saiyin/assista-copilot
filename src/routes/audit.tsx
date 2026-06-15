@@ -1,64 +1,142 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+
 import { AppShell, PageHeader } from "@/components/app-shell";
-import { Card, CardContent } from "@/components/ui/card";
+import { getSupportOverview } from "@/lib/api/support.functions";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { auditLog } from "@/lib/mock-data";
-import { Download, ShieldCheck } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
 
 export const Route = createFileRoute("/audit")({
-  head: () => ({ meta: [{ title: "Audit log — Sentinel" }] }),
+  head: () => ({ meta: [{ title: "Audit log - Sentinel" }] }),
   component: Audit,
 });
 
-const ROWS = [...auditLog,
-  { id: "A-9816", at: "10:01:18", actor: "AI" as const, action: "Suggested reply", target: "CHAT-101", detail: "Low confidence (0.62) — flagged for human review", risk: "medium" as const },
-  { id: "A-9815", at: "09:58:02", actor: "System" as const, action: "Masked PII", target: "TCK-001", detail: "Masked card and email before prompt construction", risk: "low" as const },
-  { id: "A-9814", at: "09:52:40", actor: "Agent" as const, action: "Approved & sent", target: "TCK-002", detail: "AI draft sent with 2 edits", risk: "low" as const },
-];
-
 function Audit() {
+  const overviewQuery = useQuery({
+    queryKey: ["support-overview"],
+    queryFn: () => getSupportOverview({ data: {} }),
+    refetchInterval: 10_000,
+  });
+
+  const events = overviewQuery.data?.events ?? [];
+
   return (
     <AppShell>
       <PageHeader
         title="Audit log"
-        subtitle="Every AI action is logged. Immutable and exportable for compliance."
+        subtitle="Latest persisted AI and agent actions from Supabase."
         actions={
-          <>
-            <Button size="sm" variant="outline"><Download className="mr-1.5 h-4 w-4" />Export CSV</Button>
-            <Button size="sm"><ShieldCheck className="mr-1.5 h-4 w-4" />Compliance report</Button>
-          </>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void overviewQuery.refetch()}
+            disabled={overviewQuery.isFetching}
+          >
+            <RefreshCw className={cn("mr-1.5 h-4 w-4", overviewQuery.isFetching && "animate-spin")} />
+            Refresh
+          </Button>
         }
       />
-      <div className="p-6">
+      <div className="space-y-4 p-6">
+        {overviewQuery.error && (
+          <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            {overviewQuery.error.message}
+          </div>
+        )}
+
         <Card>
           <CardContent className="p-0">
-            <div className="grid grid-cols-[100px_90px_90px_180px_1fr_90px] gap-3 border-b border-border px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <div>Time</div><div>Actor</div><div>Risk</div><div>Action</div><div>Detail</div><div>Target</div>
+            <div className="grid grid-cols-[160px_90px_90px_180px_1fr_140px] gap-3 border-b border-border px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div>Timestamp</div>
+              <div>Actor</div>
+              <div>Risk</div>
+              <div>Action</div>
+              <div>Detail</div>
+              <div>Target</div>
             </div>
-            <div className="divide-y divide-border">
-              {ROWS.map((r) => (
-                <div key={r.id} className="grid grid-cols-[100px_90px_90px_180px_1fr_90px] items-center gap-3 px-5 py-3 text-sm">
-                  <div className="font-mono text-xs text-muted-foreground">{r.at}</div>
-                  <div>
-                    <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold ${
-                      r.actor === "AI" ? "bg-ai-soft text-ai" : r.actor === "Agent" ? "bg-info/10 text-info" : "bg-muted text-muted-foreground"
-                    }`}>{r.actor}</span>
+
+            {overviewQuery.isLoading && (
+              <div className="flex items-center gap-2 px-5 py-8 text-sm text-muted-foreground">
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                Loading audit events...
+              </div>
+            )}
+
+            {!overviewQuery.isLoading && events.length > 0 && (
+              <div className="divide-y divide-border">
+                {events.map((event) => (
+                  <div
+                    key={event.id}
+                    className="grid grid-cols-[160px_90px_90px_180px_1fr_140px] items-center gap-3 px-5 py-3 text-sm"
+                  >
+                    <div className="font-mono text-xs text-muted-foreground">{formatTimestamp(event.at)}</div>
+                    <div>
+                      <span
+                        className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                          event.actor === "AI"
+                            ? "bg-ai-soft text-ai"
+                            : event.actor === "Agent"
+                              ? "bg-info/10 text-info"
+                              : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {event.actor}
+                      </span>
+                    </div>
+                    <div>
+                      <span
+                        className={`inline-flex h-2 w-2 rounded-full ${
+                          event.risk === "high"
+                            ? "bg-danger"
+                            : event.risk === "medium"
+                              ? "bg-warning"
+                              : "bg-success"
+                        }`}
+                      />
+                      <span className="ml-1.5 text-xs capitalize">{event.risk}</span>
+                    </div>
+                    <div className="font-medium">{event.action}</div>
+                    <div className="text-muted-foreground">{event.detail}</div>
+                    <div className="font-mono text-xs">{event.target}</div>
                   </div>
-                  <div>
-                    <span className={`inline-flex h-2 w-2 rounded-full ${
-                      r.risk === "high" ? "bg-danger" : r.risk === "medium" ? "bg-warning" : "bg-success"
-                    }`} />
-                    <span className="ml-1.5 text-xs capitalize">{r.risk}</span>
-                  </div>
-                  <div className="font-medium">{r.action}</div>
-                  <div className="text-muted-foreground">{r.detail}</div>
-                  <div className="font-mono text-xs">{r.target}</div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+
+            {!overviewQuery.isLoading && events.length === 0 && (
+              <div className="p-10 text-center text-sm text-muted-foreground">
+                No audit events are available yet.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-success/30 bg-success/10">
+          <CardContent className="flex items-start gap-3 p-4">
+            <ShieldCheck className="mt-0.5 h-5 w-5 text-success" />
+            <div className="text-sm">
+              <div className="font-semibold text-success">Audit coverage is active.</div>
+              <div className="text-muted-foreground">
+                Draft generation, approvals, sends, rejections, and escalations are now recorded through the UI flows.
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
     </AppShell>
   );
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }

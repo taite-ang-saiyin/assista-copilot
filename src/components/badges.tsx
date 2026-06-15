@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { Priority, Sentiment, TicketStatus } from "@/lib/mock-data";
+import type { Priority, Sentiment, TicketStatus } from "@/lib/support-models";
 import {
   ShieldAlert, AlertTriangle, Activity, CheckCircle2, Clock, Sparkles,
   Frown, Meh, AlertCircle, Flame,
