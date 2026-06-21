@@ -296,6 +296,7 @@ Expected response:
 | `GET` | `/api/agent/tickets?status=submitted` | Agent | Load the ticket queue |
 | `POST` | `/api/tickets/:trackingCode/accept` | Agent | Atomically claim a ticket |
 | `POST` | `/api/tickets/:trackingCode/replies` | Agent | Reply and optionally resolve a ticket |
+| `POST` | `/api/tickets/:trackingCode/customer-replies` | Customer | Add information to a tracked ticket |
 | `PATCH` | `/api/tickets/:trackingCode/status` | Agent | Update ticket status |
 
 ## API
@@ -1390,6 +1391,52 @@ support_dashboard
 
 The customer tracker appends the reply to Conversation Logs immediately. If the reply changes status, `ticket_status_updated` is emitted as well.
 
+### Customer Reply
+
+```text
+POST /api/tickets/:trackingCode/customer-replies
+```
+
+Request:
+
+```json
+{
+  "message": "The duplicate transaction ID is TXN-839201."
+}
+```
+
+The tracking code acts as the customer credential for this MVP. The backend:
+
+1. Validates the ticket exists and is not closed.
+2. Saves the reply in `support_ticket_replies`.
+3. Uses the ticket's customer name as `senderName`.
+4. Emits `ticket_reply` to `ticket:{trackingCode}`.
+5. Emits `ticket_reply` to `support_dashboard`.
+
+If an accepted or resolved ticket receives a customer reply, its status becomes `in_progress`. A reply to a newly submitted ticket leaves it as `submitted`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "reply-uuid",
+    "trackingCode": "TCK-8F3K2Q",
+    "senderType": "customer",
+    "senderId": null,
+    "senderName": "Mg Mg",
+    "message": "The duplicate transaction ID is TXN-839201.",
+    "createdAt": "2026-06-15T03:00:00.000Z",
+    "status": "in_progress",
+    "updatedAt": "2026-06-15T03:00:00.000Z",
+    "resolvedAt": null
+  }
+}
+```
+
+Closed tickets reject new customer replies.
+
 ### Update Ticket Status
 
 ```text
@@ -1606,9 +1653,11 @@ create index if not exists idx_support_ticket_replies_tracking_code
 11. Confirm the customer receives `ticket_accepted` and a notification.
 12. Reply with `POST /api/tickets/:trackingCode/replies`.
 13. Confirm the reply appears immediately in Conversation Logs.
-14. Reply again with `"status": "resolved"`.
-15. Confirm the milestone tracker reaches Resolved.
-16. Confirm no ticket event appears in unrelated chat or ticket rooms.
+14. Use the customer reply box and confirm the customer message appears immediately.
+15. Confirm the support dashboard receives the customer `ticket_reply`.
+16. Reply again as the agent with `"status": "resolved"`.
+17. Confirm the milestone tracker reaches Resolved.
+18. Confirm no ticket event appears in unrelated chat or ticket rooms.
 
 The customer frontend stores the latest tracking code in `localStorage` for convenience. It does not store the internal ticket UUID.
 
@@ -1635,6 +1684,7 @@ Ticket-specific MVP limitations:
 - No customer or agent authentication.
 - The tracking code acts as a bearer secret.
 - Anyone with the tracking code can view the customer-facing ticket details.
+- Anyone with the tracking code can add a customer reply.
 - Agent acceptance and status updates are currently unauthenticated.
 - Add rate limiting to ticket submission and tracking.
 - Add Supabase RLS and stricter ownership rules.

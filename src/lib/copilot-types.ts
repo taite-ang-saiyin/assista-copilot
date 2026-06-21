@@ -58,6 +58,8 @@ export type TicketDraftResult = {
   citations: string[];
   confidence: number;
   missingInfo: string[];
+  suggestedStatus: string | null;
+  resolutionLikely: boolean;
   escalationRequired: boolean;
   escalationReason: string | null;
 };
@@ -68,6 +70,8 @@ export type ChatSuggestionResult = {
   citations: string[];
   confidence: number;
   missingInfo: string[];
+  suggestedStatus: string | null;
+  resolutionLikely: boolean;
   escalationRequired: boolean;
   escalationReason: string | null;
 };

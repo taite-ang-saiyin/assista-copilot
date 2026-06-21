@@ -79,6 +79,8 @@ type TicketDraftResponse = {
   citations?: string[];
   confidence?: number;
   missing_info?: string[];
+  suggested_status?: string | null;
+  resolution_likely?: boolean;
   escalation_required?: boolean;
   escalation_reason?: string | null;
 };
@@ -89,9 +91,13 @@ type ChatSuggestionResponse = {
   citations?: string[];
   confidence?: number;
   missing_info?: string[];
+  suggested_status?: string | null;
+  resolution_likely?: boolean;
   escalation_required?: boolean;
   escalation_reason?: string | null;
 };
+
+const MEMBER3_TIMEOUT_MS = 360_000;
 
 function trimTrailingSlash(value: string) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -108,11 +114,7 @@ function buildUrl(baseUrl: string, path: string) {
   return `${trimTrailingSlash(baseUrl)}${path}`;
 }
 
-async function fetchJson<T>(
-  url: string,
-  init: RequestInit,
-  timeoutMs = 20_000,
-): Promise<T> {
+async function fetchJson<T>(url: string, init: RequestInit, timeoutMs = 20_000): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -249,10 +251,7 @@ export async function uploadKnowledgeDocument(formData: FormData) {
   };
 }
 
-export async function reindexKnowledgeDocument(input: {
-  docId?: string;
-  force?: boolean;
-}) {
+export async function reindexKnowledgeDocument(input: { docId?: string; force?: boolean }) {
   const { baseUrl, apiKey } = knowledgeHeaders();
   return fetchJson<{ status: string; indexed_documents: number }>(
     buildUrl(baseUrl, "/knowledge/reindex"),
@@ -319,10 +318,7 @@ export async function searchKnowledge(input: {
   };
 }
 
-export async function analyzeSupportText(input: {
-  message: string;
-  ticketId?: string;
-}) {
+export async function analyzeSupportText(input: { message: string; ticketId?: string }) {
   const baseUrl = member1BaseUrl();
   const response = await fetchJson<Member1AnalyzeResponse>(
     buildUrl(baseUrl, "/tickets/analyze"),
@@ -342,10 +338,7 @@ export async function analyzeSupportText(input: {
   return normalizeIntelligenceAnalysis(response);
 }
 
-export async function createTicketDraft(
-  ticketId: string,
-  payload: JsonRecord,
-) {
+export async function createTicketDraft(ticketId: string, payload: JsonRecord) {
   const baseUrl = member3BaseUrl();
   const response = await fetchJson<TicketDraftResponse>(
     buildUrl(baseUrl, `/tickets/${encodeURIComponent(ticketId)}/draft`),
@@ -356,15 +349,13 @@ export async function createTicketDraft(
       },
       body: JSON.stringify(payload),
     },
+    MEMBER3_TIMEOUT_MS,
   );
 
   return normalizeTicketDraft(response);
 }
 
-export async function createChatSuggestion(
-  conversationId: string,
-  payload: JsonRecord,
-) {
+export async function createChatSuggestion(conversationId: string, payload: JsonRecord) {
   const baseUrl = member3BaseUrl();
   const response = await fetchJson<ChatSuggestionResponse>(
     buildUrl(baseUrl, `/chat/conversations/${encodeURIComponent(conversationId)}/suggest`),
@@ -375,6 +366,7 @@ export async function createChatSuggestion(
       },
       body: JSON.stringify(payload),
     },
+    MEMBER3_TIMEOUT_MS,
   );
 
   return normalizeChatSuggestion(response);
@@ -387,14 +379,14 @@ function normalizeTicketDraft(response: TicketDraftResponse): TicketDraftResult 
     citations: response.citations ?? [],
     confidence: response.confidence ?? 0,
     missingInfo: response.missing_info ?? [],
+    suggestedStatus: response.suggested_status ?? null,
+    resolutionLikely: response.resolution_likely ?? false,
     escalationRequired: response.escalation_required ?? false,
     escalationReason: response.escalation_reason ?? null,
   };
 }
 
-function normalizeIntelligenceAnalysis(
-  response: Member1AnalyzeResponse,
-): IntelligenceAnalysis {
+function normalizeIntelligenceAnalysis(response: Member1AnalyzeResponse): IntelligenceAnalysis {
   return {
     category: response.predictions?.category ?? "General",
     priority: response.predictions?.priority ?? "Medium",
@@ -417,15 +409,15 @@ function normalizeIntelligenceAnalysis(
   };
 }
 
-function normalizeChatSuggestion(
-  response: ChatSuggestionResponse,
-): ChatSuggestionResult {
+function normalizeChatSuggestion(response: ChatSuggestionResponse): ChatSuggestionResult {
   return {
     suggestedReply: response.suggested_reply ?? "",
     agentNotes: response.agent_notes ?? "",
     citations: response.citations ?? [],
     confidence: response.confidence ?? 0,
     missingInfo: response.missing_info ?? [],
+    suggestedStatus: response.suggested_status ?? null,
+    resolutionLikely: response.resolution_likely ?? false,
     escalationRequired: response.escalation_required ?? false,
     escalationReason: response.escalation_reason ?? null,
   };

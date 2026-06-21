@@ -1,9 +1,20 @@
 import { createServerFn } from "@tanstack/react-start";
 
-import { getAnalyticsDashboardData } from "./member4.server";
+import {
+  getAnalyticsDashboardData,
+  getEvaluationRunDetail,
+  type AnalyticsDashboardFilters,
+} from "./member4.server";
 
 export const getAnalyticsDashboard = createServerFn({ method: "GET" })
-  .validator((input: { module?: string } | undefined) => input)
+  .validator((input: AnalyticsDashboardFilters | undefined) => input)
   .handler(async ({ data }) => {
-    return getAnalyticsDashboardData(data?.module ?? "generation");
+    return getAnalyticsDashboardData(data);
+  });
+
+export const getAnalyticsRunDetail = createServerFn({ method: "GET" })
+  .validator((input: { runId: string } | undefined) => input)
+  .handler(async ({ data }) => {
+    if (!data?.runId) return null;
+    return getEvaluationRunDetail(data.runId);
   });

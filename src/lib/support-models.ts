@@ -3,6 +3,12 @@ import type { CitationSource, IntelligenceAnalysis } from "./copilot-types";
 export type Priority = "Low" | "Medium" | "High" | "Urgent";
 export type Sentiment = "Neutral" | "Confused" | "Frustrated" | "Angry";
 export type TicketStatus = "New" | "Analyzed" | "Drafted" | "Waiting" | "Escalated" | "Resolved";
+export type BackendTicketStatus =
+  | "submitted"
+  | "accepted"
+  | "in_progress"
+  | "resolved"
+  | "closed";
 
 export type SupportMessage = {
   id: string;
@@ -10,6 +16,13 @@ export type SupportMessage = {
   senderName: string;
   at: string;
   text: string;
+};
+
+export type Member3HistoryItem = {
+  sender: "customer" | "agent";
+  message: string;
+  timestamp?: string;
+  message_id?: string;
 };
 
 export type PersistedTicketDraft = {
@@ -20,6 +33,8 @@ export type PersistedTicketDraft = {
   citations: string[];
   missingInfo: string[];
   confidence: number;
+  suggestedStatus: string | null;
+  resolutionLikely: boolean;
   escalationRequired: boolean;
   escalationReason: string | null;
   sourceQuery: string | null;
@@ -38,6 +53,8 @@ export type PersistedChatSuggestion = {
   citations: string[];
   missingInfo: string[];
   confidence: number;
+  suggestedStatus: string | null;
+  resolutionLikely: boolean;
   escalationRequired: boolean;
   escalationReason: string | null;
   sourceQuery: string | null;
@@ -65,6 +82,7 @@ export type TicketListItem = {
   priority: Priority;
   sentiment: Sentiment;
   status: TicketStatus;
+  backendStatus: BackendTicketStatus;
   subject: string;
   description: string;
   createdAt: string;

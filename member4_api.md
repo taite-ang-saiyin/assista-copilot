@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the backend API for the Member 4 Evaluation, Feedback, and Analytics service.
+This document describes the backend API for the Member 4 Evaluation, Feedback, Analytics, and AI Quality Monitoring service.
 
 Default local base URL:
 
@@ -34,38 +34,81 @@ Example response:
 ## Current Notes
 
 - The service is a separate FastAPI app from the main support API.
-- Storage is designed for Supabase/PostgreSQL.
+- Storage is designed for Supabase/PostgreSQL, with an in-memory repository for tests and local development.
 - There is currently no authentication layer on these routes.
 - Before using the service against Supabase, apply [supabase_schema.sql](</c:/Users/Msi GF66/Desktop/Customer Support AI/member4_api/sql/supabase_schema.sql:1>).
+- The implementation now follows the updated `member_4_tasks.md` scope: offline benchmark evaluation, dynamic live monitoring, feedback analytics, error analysis, dataset generation, and export.
+- Older analytics routes are still available for compatibility:
+  `GET /api/member4/analytics/overview`
+  `GET /api/member4/analytics/evaluation`
+  `GET /api/member4/analytics/live-chat`
+  `GET /api/member4/analytics/comparisons`
 
-## Core Route Groups
+## Route Groups
 
-- Evaluation runs and metrics
-- Feedback logging
+- Offline evaluation runs and metrics
+- Live interaction logging
+- Agent feedback analytics
 - Error analysis
-- Fine-tuning examples and JSONL export
-- Import endpoints for Members 1, 2, and 3
-- Analytics summaries
+- Fine-tuning example review and export
+- Member 1, 2, and 3 import endpoints
+- Benchmark and live-monitoring summaries
 - A/B assignment storage
 
 ---
 
-## POST /api/member4/evaluation-runs
+## Data Model Summary
 
-Create one evaluation run and optionally attach metrics and error cases.
+Main tables:
 
-### Example Request
+- `evaluation_runs`
+- `evaluation_metrics`
+- `ai_interactions`
+- `agent_feedback`
+- `error_analysis`
+- `fine_tuning_examples`
+- `ab_test_assignments`
+
+Primary IDs returned by the API:
+
+- Evaluation run: `run_id`
+- Evaluation metric: `metric_id`
+- Interaction: `interaction_id`
+- Feedback: `feedback_id`
+- Error: `error_id`
+- Fine-tuning example: `example_id`
+- A/B assignment: `assignment_id`
+
+For compatibility, responses also include `id` with the same value as the primary ID field.
+
+---
+
+## Offline Evaluation APIs
+
+### POST /api/member4/evaluation-runs
+
+Create one offline benchmark run and optionally attach metrics and error cases.
+
+Example request:
 
 ```json
 {
-  "run_name": "member3_generation_eval_v1",
+  "member_name": "Member 3",
+  "run_name": "local_llm_ft_v1_eval",
   "module": "generation",
-  "model_name": "member3_qwen_3b_q4_k_m",
+  "model_name": "local_llm_finetuned",
+  "model_version": "local_llm_ft_v1",
   "prompt_version": "support_prompt_v3",
-  "dataset_name": "member3_qwen_test_clean",
+  "dataset_name": "reply_eval_dataset_v1",
   "dataset_version": "v1",
+  "dataset_size": 50,
   "mlflow_run_id": "run_123",
   "metrics": [
+    {
+      "metric_name": "faithfulness_rate",
+      "metric_value": 0.86,
+      "metric_unit": "ratio"
+    },
     {
       "metric_name": "json_validity_rate",
       "metric_value": 0.96,
@@ -74,40 +117,43 @@ Create one evaluation run and optionally attach metrics and error cases.
   ],
   "error_cases": [
     {
+      "source_type": "offline_eval",
       "module": "generation",
       "error_type": "hallucination",
       "severity": "high",
       "description": "Unsupported refund promise detected."
     }
   ],
-  "notes": "Offline evaluation summary.",
-  "metadata": {
-    "scenario": "local-finetuned"
-  }
+  "notes": "Offline benchmark for the current fine-tuned model."
 }
 ```
 
-### Response
+Example response:
 
 ```json
 {
   "run": {
-    "id": "generated-id",
-    "run_name": "member3_generation_eval_v1",
-    "module": "generation"
+    "run_id": "generated-run-id",
+    "id": "generated-run-id",
+    "member_name": "Member 3",
+    "module": "generation",
+    "run_name": "local_llm_ft_v1_eval"
   },
   "metrics": [
     {
-      "id": "generated-id",
-      "run_id": "generated-id",
-      "metric_name": "json_validity_rate",
-      "metric_value": 0.96,
+      "metric_id": "generated-metric-id",
+      "id": "generated-metric-id",
+      "run_id": "generated-run-id",
+      "metric_name": "faithfulness_rate",
+      "metric_value": 0.86,
       "metric_unit": "ratio"
     }
   ],
   "errors": [
     {
-      "id": "generated-id",
+      "error_id": "generated-error-id",
+      "id": "generated-error-id",
+      "source_type": "offline_eval",
       "module": "generation",
       "error_type": "hallucination",
       "severity": "high"
@@ -116,341 +162,502 @@ Create one evaluation run and optionally attach metrics and error cases.
 }
 ```
 
-## GET /api/member4/evaluation-runs
+### GET /api/member4/evaluation-runs
 
 List evaluation runs.
 
-### Query Parameters
+Query parameters:
 
-- `module`: optional filter such as `classifier`, `retrieval`, `generation`, or `live_chat`
+- `module`: optional filter such as `classifier`, `retrieval`, `generation`, `live_chat`, or `full_pipeline`
 
-## GET /api/member4/evaluation-runs/{run_id}
+### GET /api/member4/evaluation-runs/{run_id}
 
 Return one evaluation run with attached metrics.
 
-## POST /api/member4/evaluation-runs/{run_id}/metrics
+### POST /api/member4/evaluation-runs/{run_id}/metrics
 
 Append additional metrics to an existing run.
 
-### Example Request
+Example request:
 
 ```json
 [
   {
-    "metric_name": "faithfulness_rate",
-    "metric_value": 0.88,
-    "metric_unit": "ratio"
+    "metric_name": "reply_quality_avg",
+    "metric_value": 4.2,
+    "metric_unit": "score"
   }
 ]
 ```
 
+### GET /api/member4/benchmark-summary
+
+Return the latest benchmark cards and latest run by module.
+
+This is the API-facing version of the offline benchmark summary required by the updated task spec.
+
 ---
 
-## POST /api/member4/feedback
+## Live Monitoring APIs
 
-Store agent feedback for a draft or live-chat suggestion.
+### POST /api/member4/interactions
 
-### Example Request
+Store one AI interaction from a real ticket or live chat.
+
+Example request:
 
 ```json
 {
-  "ticket_id": "T001",
-  "draft_id": "D001",
-  "agent_id": "A001",
+  "ticket_id": "00000000-0000-0000-0000-000000000001",
+  "mode": "ticket",
+  "module": "full_pipeline",
+  "category": "Billing",
+  "intent": "refund_request",
+  "priority": "High",
+  "sentiment": "Frustrated",
+  "customer_message": "I was charged twice and I want a refund.",
+  "ai_output": "I am sorry for the trouble. Could you please share your transaction ID?",
+  "confidence": 0.84,
+  "model_name": "local_llm_finetuned",
+  "model_version": "local_llm_ft_v1",
+  "prompt_version": "support_prompt_v3",
+  "retrieval_version": "hybrid_search_v1",
+  "latency_ms": 2100,
+  "escalation_required": false
+}
+```
+
+### GET /api/member4/interactions
+
+List AI interactions.
+
+Query parameters:
+
+- `mode`
+- `module`
+- `category`
+- `intent`
+- `priority`
+- `model_version`
+- `prompt_version`
+- `retrieval_version`
+- `ticket_id`
+- `conversation_id`
+- `date_from` in `YYYY-MM-DD`
+- `date_to` in `YYYY-MM-DD`
+
+### GET /api/member4/live-summary
+
+Return dynamic live-monitoring metrics computed from stored interactions, feedback, and error rows.
+
+Query parameters:
+
+- All major interaction filters from `/interactions`
+- `low_confidence_threshold`: defaults to `0.6`
+
+Example fields in the response:
+
+```json
+{
+  "total_ai_interactions": 540,
+  "acceptance_rate": 0.72,
+  "edit_rate": 0.18,
+  "rejection_rate": 0.1,
+  "ignore_rate": 0.05,
+  "regeneration_rate": 0.03,
+  "escalation_rate": 0.09,
+  "average_confidence": 0.81,
+  "average_rating": 4.1,
+  "average_latency": 1934.2,
+  "low_confidence_count": 28,
+  "critical_unresolved_errors": 2,
+  "live_chat_metrics": {
+    "live_chat_suggestion_acceptance_rate": 0.69,
+    "live_chat_ignore_rate": 0.11,
+    "live_chat_average_latency": 1422.5,
+    "live_chat_escalation_rate": 0.08,
+    "live_chat_repeated_question_count": 4
+  }
+}
+```
+
+### GET /api/member4/performance-by-category
+
+Return dynamic performance grouped by `category`.
+
+### GET /api/member4/performance-by-intent
+
+Return dynamic performance grouped by `intent`.
+
+### GET /api/member4/confidence-distribution
+
+Return bucketed confidence counts and average confidence.
+
+### GET /api/member4/low-confidence-interactions
+
+Return the lowest-confidence interactions.
+
+Query parameters:
+
+- `threshold`: defaults to `0.6`
+- `limit`: defaults to `50`
+
+---
+
+## Feedback APIs
+
+### POST /api/member4/feedback
+
+Store one agent feedback row.
+
+If `interaction_id` is supplied, it must reference an existing interaction.
+
+Example request:
+
+```json
+{
+  "interaction_id": "generated-interaction-id",
+  "ticket_id": "00000000-0000-0000-0000-000000000001",
   "action": "edited",
   "rating": 4,
   "original_reply": "Please send transaction ID.",
   "edited_reply": "I am sorry for the trouble. Could you please share your transaction ID so we can verify the duplicate charge?",
-  "failure_reason": "Poor tone",
-  "feedback_notes": "Needed a more empathetic opening."
+  "failure_reason": "poor_tone",
+  "feedback_notes": "The reply was correct but too abrupt."
 }
 ```
 
-## GET /api/member4/feedback
+Compatibility note:
+
+- Older clients may still send `draft_id` and `suggestion_id`. Those fields are still accepted and stored.
+
+### GET /api/member4/feedback
 
 List feedback rows.
 
-## GET /api/member4/feedback-summary
+Query parameters:
 
-Return aggregate feedback statistics.
+- `action`
+- `interaction_id`
+- `ticket_id`
+- `conversation_id`
+- `date_from`
+- `date_to`
 
-### Example Response
+### GET /api/member4/feedback-summary
 
-```json
-{
-  "total_feedback": 12,
-  "action_counts": {
-    "accepted": 7,
-    "edited": 3,
-    "rejected": 2
-  },
-  "action_rates": {
-    "accepted": 0.5833,
-    "edited": 0.25,
-    "rejected": 0.1667
-  },
-  "average_rating": 4.25
-}
-```
+Return aggregate feedback counts and rates.
+
+### GET /api/member4/feedback-trend
+
+Return feedback grouped by day with action counts and average rating.
+
+### GET /api/member4/failure-reasons
+
+Return aggregated `failure_reason` counts and rates.
 
 ---
 
-## POST /api/member4/errors
+## Error Analysis APIs
 
-Store one error-analysis record.
+### POST /api/member4/errors
 
-### Example Request
+Store one error-analysis row.
+
+If `run_id` is supplied, it must reference an existing evaluation run.
+If `interaction_id` is supplied, it must reference an existing interaction.
+
+Example request:
 
 ```json
 {
-  "module": "retrieval",
-  "run_id": "RUN-001",
-  "error_type": "bad_retrieval",
-  "severity": "medium",
-  "description": "Irrelevant chunk returned for refund request.",
-  "expected_behavior": "Refund policy should have ranked first.",
-  "actual_behavior": "A generic billing FAQ ranked first."
+  "source_type": "live_feedback",
+  "interaction_id": "generated-interaction-id",
+  "ticket_id": "00000000-0000-0000-0000-000000000001",
+  "module": "full_pipeline",
+  "error_type": "missed_escalation",
+  "severity": "critical",
+  "description": "Security case should have been escalated to the security team.",
+  "expected_behavior": "Escalate immediately.",
+  "actual_behavior": "The AI suggested basic troubleshooting instead."
 }
 ```
 
-## GET /api/member4/errors
+### GET /api/member4/errors
 
 List error cases.
 
-### Query Parameters
+Query parameters:
 
-- `module`: optional module filter
+- `module`
+- `source_type`
+- `severity`
+- `resolved`
+- `date_from`
+- `date_to`
 
-## PATCH /api/member4/errors/{error_id}/resolved
+### GET /api/member4/error-summary
+
+Return counts by error type, severity, source type, and resolved status.
+
+### PATCH /api/member4/errors/{error_id}/resolved
 
 Mark an error case as resolved.
 
-### Example Request
+Example request:
 
 ```json
 {
-  "resolution_notes": "Reranking weights updated."
+  "resolution_notes": "Escalation rule updated for account security cases."
 }
 ```
 
-## GET /api/member4/error-summary
-
-Return aggregate error counts by type and severity.
-
 ---
 
-## POST /api/member4/fine-tuning-examples
+## Dataset Management APIs
 
-Create a fine-tuning example record.
+### POST /api/member4/fine-tuning-examples
 
-### Example Request
+Create one candidate or approved fine-tuning example.
+
+If `source_feedback_id` is supplied, it must reference an existing feedback row.
+If `source_interaction_id` is supplied, it must reference an existing interaction.
+
+Example request:
 
 ```json
 {
+  "source_feedback_id": "generated-feedback-id",
+  "source_interaction_id": "generated-interaction-id",
   "task_type": "reply_generation",
   "input_json": {
-    "customer_message": "I was charged twice yesterday.",
-    "retrieved_context": "Duplicate charges are eligible for refund after payment verification."
+    "customer_message": "I was charged twice.",
+    "category": "Billing",
+    "intent": "refund_request",
+    "missing_info": ["transaction_id"]
   },
   "target_json": {
     "reply": "I am sorry for the trouble. Could you please share your transaction ID so we can verify the duplicate charge?"
   },
   "quality_score": 5,
   "approved": false,
-  "approval_status": "pending",
-  "source_member": "member3"
+  "approval_status": "pending"
 }
 ```
 
-## GET /api/member4/fine-tuning-examples
+### GET /api/member4/fine-tuning-examples
 
 List fine-tuning examples.
 
-### Query Parameters
+Query parameters:
 
-- `approved`: optional boolean filter
+- `approved`
+- `approval_status`
+- `task_type`
 
-## PATCH /api/member4/fine-tuning-examples/{example_id}/approve
+### PATCH /api/member4/fine-tuning-examples/{example_id}/approve
 
-Approve or reject a fine-tuning example.
+Approve one example.
 
-### Example Request
+Body is optional. If provided, the endpoint still forces:
 
-```json
-{
-  "approved": true,
-  "approval_status": "approved"
-}
-```
+- `approved = true`
+- `approval_status = approved`
 
-## GET /api/member4/fine-tuning-examples/export
+### PATCH /api/member4/fine-tuning-examples/{example_id}/reject
 
-Export examples as JSONL.
+Reject one example.
 
-### Query Parameters
+Body is optional. If provided, the endpoint still forces:
+
+- `approved = false`
+- `approval_status = rejected`
+
+### GET /api/member4/fine-tuning-examples/export
+
+Export examples.
+
+Query parameters:
 
 - `approved`: defaults to `true`
+- `format`: `jsonl` or `csv`, defaults to `jsonl`
 
-### Example Response
+Example JSONL row:
 
 ```json
-{"task_type":"reply_generation","input":{"customer_message":"I was charged twice yesterday."},"target":{"reply":"Please share your transaction ID."}}
+{"task_type":"reply_generation","input":{"customer_message":"I was charged twice."},"target":{"reply":"Please share your transaction ID."}}
 ```
 
 ---
 
-## POST /api/member4/import/member1
+## Member Import APIs
 
-Import normalized evaluation output from Member 1.
-
-### Example Request
-
-```json
-{
-  "run_name": "distilbert_ticket_intelligence_v1",
-  "module": "classifier",
-  "model_name": "distilbert-base-uncased",
-  "mlflow_run_id": "abc123",
-  "dataset_name": "ticket_eval_set_v1",
-  "metrics": {
-    "intent_accuracy": 0.87,
-    "category_accuracy": 0.84,
-    "priority_accuracy": 0.81,
-    "sentiment_accuracy": 0.78,
-    "urgent_recall": 0.91
-  },
-  "failed_prediction_examples": []
-}
-```
-
-## POST /api/member4/import/member2
-
-Import normalized evaluation output from Member 2.
-
-### Example Request
-
-```json
-{
-  "run_name": "hybrid_retrieval_v1",
-  "module": "retrieval",
-  "retrieval_version": "hybrid_search_v1",
-  "vector_database": "pgvector",
-  "embedding_model": "bge-small-en",
-  "dataset_name": "rag_eval_set_v1",
-  "metrics": {
-    "retrieval_hit_rate": 0.84,
-    "context_precision": 0.79,
-    "context_recall": 0.76,
-    "mrr": 0.81,
-    "citation_coverage": 0.88
-  },
-  "failed_retrieval_examples": []
-}
-```
-
-## POST /api/member4/import/member3
-
-Import normalized evaluation output from Member 3.
-
-### Example Request
-
-```json
-{
-  "run_name": "member3_local_finetuned_ticket_eval",
-  "module": "generation",
-  "model_name": "member3_qwen_3b_q4_k_m",
-  "prompt_version": "current",
-  "dataset_name": "member3_qwen_test_clean",
-  "metrics": {
-    "json_validity_rate": 0.96,
-    "faithfulness_rate": 0.88,
-    "status_accuracy": 0.84,
-    "resolution_accuracy": 0.81
-  },
-  "failed_generation_examples": []
-}
-```
-
-Each import endpoint normalizes the input into:
+These endpoints normalize evaluation inputs from Members 1, 2, and 3 into:
 
 - `evaluation_runs`
 - `evaluation_metrics`
 - `error_analysis`
 
----
+### POST /api/member4/import/member1
 
-## GET /api/member4/analytics/overview
-
-Return high-level aggregate counts across runs, metrics, feedback, errors, and fine-tuning examples.
-
-## GET /api/member4/analytics/evaluation
-
-Return summarized metric aggregates.
-
-### Query Parameters
-
-- `module`: optional module filter
-
-### Example Response
+Example request:
 
 ```json
 {
-  "module": "generation",
-  "run_count": 2,
-  "metric_summary": {
-    "json_validity_rate": {
-      "count": 2,
-      "avg": 0.955,
-      "min": 0.95,
-      "max": 0.96
+  "run_name": "distilbert_ticket_v1_eval",
+  "member_name": "Member 1",
+  "module": "classifier",
+  "model_name": "DistilBERT",
+  "model_version": "distilbert_ticket_v1",
+  "dataset_name": "ticket_test_dataset_v1",
+  "dataset_size": 100,
+  "mlflow_run_id": "abc123",
+  "metrics": {
+    "intent_accuracy": 0.88,
+    "category_accuracy": 0.85,
+    "priority_f1": 0.81,
+    "urgent_recall": 0.76,
+    "sentiment_accuracy": 0.79
+  },
+  "failed_prediction_examples": [
+    {
+      "error_type": "wrong_priority",
+      "severity": "high",
+      "description": "Security issue predicted as Medium priority."
     }
-  }
+  ]
 }
 ```
 
-## GET /api/member4/analytics/live-chat
+### POST /api/member4/import/member2
 
-Return live-chat-focused evaluation and feedback summary.
+Example request:
 
-## GET /api/member4/analytics/comparisons
+```json
+{
+  "run_name": "hybrid_search_v1_eval",
+  "member_name": "Member 2",
+  "module": "retrieval",
+  "retrieval_version": "hybrid_search_v1",
+  "model_name": "bge-small-en",
+  "embedding_model": "bge-small-en",
+  "chunking_strategy": "markdown_sections_v1",
+  "dataset_name": "rag_test_dataset_v1",
+  "dataset_size": 50,
+  "metrics": {
+    "retrieval_hit_rate": 0.84,
+    "citation_coverage": 0.79,
+    "context_precision": 0.77,
+    "mrr": 0.72
+  },
+  "failed_retrieval_examples": []
+}
+```
+
+### POST /api/member4/import/member3
+
+Example request:
+
+```json
+{
+  "run_name": "local_llm_ft_v1_eval",
+  "member_name": "Member 3",
+  "module": "generation",
+  "model_name": "local_llm_finetuned",
+  "model_version": "local_llm_ft_v1",
+  "prompt_version": "support_prompt_v3",
+  "dataset_name": "reply_eval_dataset_v1",
+  "dataset_size": 50,
+  "metrics": {
+    "faithfulness_rate": 0.86,
+    "hallucination_rate": 0.07,
+    "reply_quality_avg": 4.2,
+    "escalation_accuracy": 0.88,
+    "json_validity_rate": 0.96
+  },
+  "failed_generation_examples": []
+}
+```
+
+---
+
+## Analytics Compatibility APIs
+
+These routes remain available because the existing project already referenced them.
+
+### GET /api/member4/analytics/overview
+
+Returns:
+
+- Offline benchmark summary
+- Dynamic live monitoring summary
+- Feedback summary
+- Error summary
+- Fine-tuning example counts
+
+### GET /api/member4/analytics/evaluation
+
+Return summarized metric aggregates.
+
+Query parameters:
+
+- `module`
+
+### GET /api/member4/analytics/live-chat
+
+Return live-chat-focused evaluation and monitoring summary.
+
+### GET /api/member4/analytics/comparisons
 
 Return run-level comparison rows with attached metrics.
 
-### Query Parameters
+Query parameters:
 
-- `module`: optional module filter
-- `metric_names`: optional repeated query parameter
+- `module`
+- `metric_names` repeated query parameter
 
 Example:
 
 ```http
-GET /api/member4/analytics/comparisons?module=generation&metric_names=json_validity_rate&metric_names=faithfulness_rate
+GET /api/member4/analytics/comparisons?module=generation&metric_names=faithfulness_rate&metric_names=json_validity_rate
 ```
 
 ---
 
-## POST /api/member4/ab-test-assignments
+## A/B Assignment APIs
 
-Store one A/B assignment record.
+### POST /api/member4/ab-test-assignments
 
-### Example Request
+Store one A/B assignment row.
+
+Current canonical payload:
 
 ```json
 {
-  "module": "live_chat",
-  "subject_id": "CHAT-101",
+  "entity_type": "conversation",
+  "entity_id": "00000000-0000-0000-0000-000000000003",
   "experiment_name": "prompt-v1-vs-v2",
-  "variant": "candidate_a"
+  "variant_name": "candidate_a"
 }
 ```
 
-## GET /api/member4/ab-test-assignments
+Compatibility note:
+
+- Older clients may still send `module`, `subject_id`, and `variant`. Those keys are still accepted.
+
+### GET /api/member4/ab-test-assignments
 
 List A/B assignments.
 
-### Query Parameters
+Query parameters:
 
-- `experiment_name`: optional filter
+- `experiment_name`
+
+Responses include both the canonical fields and compatibility aliases:
+
+- `entity_type` and `module`
+- `entity_id` and `subject_id`
+- `variant_name` and `variant`
 
 ---
 
@@ -465,7 +672,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
 MEMBER4_BASE_URL=http://127.0.0.1:8001
 ```
 
-For local in-memory testing, the service layer can use:
+For local in-memory testing:
 
 ```text
 MEMBER4_STORAGE_BACKEND=memory
@@ -480,5 +687,6 @@ MEMBER4_STORAGE_BACKEND=memory
 - [member4_api/schemas.py](</c:/Users/Msi GF66/Desktop/Customer Support AI/member4_api/schemas.py:1>)
 - [member4_api/repository.py](</c:/Users/Msi GF66/Desktop/Customer Support AI/member4_api/repository.py:1>)
 - [member4_api/sql/supabase_schema.sql](</c:/Users/Msi GF66/Desktop/Customer Support AI/member4_api/sql/supabase_schema.sql:1>)
+- [live_chat/tests/test_member4_api.py](</c:/Users/Msi GF66/Desktop/Customer Support AI/live_chat/tests/test_member4_api.py:1>)
 - [docker-compose.yml](</c:/Users/Msi GF66/Desktop/Customer Support AI/docker-compose.yml:1>)
-- [live_chat/evaluation/member3_offline_report.py](</c:/Users/Msi GF66/Desktop/Customer Support AI/live_chat/evaluation/member3_offline_report.py:1>)
+- [member_4_tasks.md](</c:/Users/Msi GF66/Desktop/Customer Support AI/member_4_tasks.md:1>)

@@ -10,6 +10,7 @@ import {
 } from "./customer-backend.server";
 import type {
   AuditEvent,
+  BackendTicketStatus,
   ChatDetailData,
   ChatListItem,
   EscalationRecord,
@@ -26,15 +27,31 @@ import type {
 import { getDefaultAgent, getSupabaseAdmin } from "./supabase.server";
 
 type JsonRecord = Record<string, unknown>;
+type Member3ResponseMetadata = {
+  suggested_status?: string | null;
+  resolution_likely?: boolean;
+};
 
 function asRecord(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function member3MetadataFromSnapshot(value: unknown): Member3ResponseMetadata {
+  const snapshot = asRecord(value);
+  const metadata = asRecord(snapshot.member3_response);
+
+  return {
+    suggested_status:
+      typeof metadata.suggested_status === "string" || metadata.suggested_status == null
+        ? (metadata.suggested_status as string | null | undefined)
+        : undefined,
+    resolution_likely:
+      typeof metadata.resolution_likely === "boolean" ? metadata.resolution_likely : undefined,
+  };
 }
 
 function titleCase(value: string | null | undefined) {
@@ -128,6 +145,8 @@ function serializeSupportMessage(row: Record<string, unknown>): SupportMessage {
 }
 
 function serializeTicketDraft(row: Record<string, unknown>): PersistedTicketDraft {
+  const metadata = member3MetadataFromSnapshot(row.analysis_snapshot);
+
   return {
     id: String(row.id),
     generatedReply: String(row.generated_reply ?? ""),
@@ -136,6 +155,10 @@ function serializeTicketDraft(row: Record<string, unknown>): PersistedTicketDraf
     citations: asArray<string>(row.citations),
     missingInfo: asArray<string>(row.missing_info),
     confidence: Number(row.confidence ?? 0),
+    suggestedStatus:
+      (row.suggested_status as string | null | undefined) ?? metadata.suggested_status ?? null,
+    resolutionLikely:
+      (row.resolution_likely as boolean | null | undefined) ?? metadata.resolution_likely ?? false,
     escalationRequired: Boolean(row.escalation_required),
     escalationReason: (row.escalation_reason as string | null) ?? null,
     sourceQuery: (row.source_query as string | null) ?? null,
@@ -150,6 +173,8 @@ function serializeTicketDraft(row: Record<string, unknown>): PersistedTicketDraf
 }
 
 function serializeChatSuggestion(row: Record<string, unknown>): PersistedChatSuggestion {
+  const metadata = member3MetadataFromSnapshot(row.analysis_snapshot);
+
   return {
     id: String(row.id),
     generatedReply: String(row.generated_reply ?? ""),
@@ -158,6 +183,10 @@ function serializeChatSuggestion(row: Record<string, unknown>): PersistedChatSug
     citations: asArray<string>(row.citations),
     missingInfo: asArray<string>(row.missing_info),
     confidence: Number(row.confidence ?? 0),
+    suggestedStatus:
+      (row.suggested_status as string | null | undefined) ?? metadata.suggested_status ?? null,
+    resolutionLikely:
+      (row.resolution_likely as boolean | null | undefined) ?? metadata.resolution_likely ?? false,
     escalationRequired: Boolean(row.escalation_required),
     escalationReason: (row.escalation_reason as string | null) ?? null,
     sourceQuery: (row.source_query as string | null) ?? null,
@@ -268,18 +297,19 @@ function mapTicketRow(
     escalationReason: escalations[0]?.reason ?? latestDraft?.escalationReason ?? null,
   });
 
+  const dbStatus = String(row.status ?? "");
+
   return {
     id: String(row.id),
     trackingCode: String(row.tracking_code ?? ""),
     customerName: String(row.customer_full_name ?? ""),
     category: titleCase(String(row.category ?? "")),
-    priority: normalizePriority(latestDraft?.analysisSnapshot?.priority ?? String(row.priority ?? "")),
-    sentiment,
-    status: mapTicketStatus(
-      String(row.status ?? ""),
-      openEscalation,
-      latestDraft?.status ?? null,
+    priority: normalizePriority(
+      latestDraft?.analysisSnapshot?.priority ?? String(row.priority ?? ""),
     ),
+    sentiment,
+    status: mapTicketStatus(dbStatus, openEscalation, latestDraft?.status ?? null),
+    backendStatus: dbStatus as BackendTicketStatus,
     subject: String(row.subject ?? ""),
     description: String(row.description ?? ""),
     createdAt: String(row.created_at ?? ""),
@@ -403,26 +433,25 @@ export async function getSupportOverviewData(): Promise<SupportOverview> {
     resolutionRows,
     draftedTicketRows,
     openEscalationRows,
-  ] =
-    await Promise.all([
-      listSupportTickets(4),
-      listChatSessions(4),
-      supabase
-        .from("ai_ticket_drafts")
-        .select("id, tracking_code, created_at, confidence")
-        .order("created_at", { ascending: false })
-        .limit(5),
-      supabase
-        .from("ai_chat_suggestions")
-        .select("id, session_id, created_at, confidence")
-        .order("created_at", { ascending: false })
-        .limit(5),
-      supabase.from("agent_feedback").select("*").order("created_at", { ascending: false }).limit(5),
-      supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(5),
-      supabase.from("support_tickets").select("created_at, resolved_at, status"),
-      supabase.from("ai_ticket_drafts").select("ticket_id"),
-      supabase.from("escalations").select("id, status"),
-    ]);
+  ] = await Promise.all([
+    listSupportTickets(4),
+    listChatSessions(4),
+    supabase
+      .from("ai_ticket_drafts")
+      .select("id, tracking_code, created_at, confidence")
+      .order("created_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("ai_chat_suggestions")
+      .select("id, session_id, created_at, confidence")
+      .order("created_at", { ascending: false })
+      .limit(5),
+    supabase.from("agent_feedback").select("*").order("created_at", { ascending: false }).limit(5),
+    supabase.from("escalations").select("*").order("created_at", { ascending: false }).limit(5),
+    supabase.from("support_tickets").select("created_at, resolved_at, status"),
+    supabase.from("ai_ticket_drafts").select("ticket_id"),
+    supabase.from("escalations").select("id, status"),
+  ]);
 
   unwrapError(recentDrafts.error, "Failed to load recent ticket drafts");
   unwrapError(recentSuggestions.error, "Failed to load recent chat suggestions");
@@ -438,7 +467,9 @@ export async function getSupportOverviewData(): Promise<SupportOverview> {
   }).length;
 
   const aiDraftedCount = new Set(
-    (draftedTicketRows.data ?? []).map((row) => String((row as Record<string, unknown>).ticket_id ?? "")),
+    (draftedTicketRows.data ?? []).map((row) =>
+      String((row as Record<string, unknown>).ticket_id ?? ""),
+    ),
   ).size;
 
   const escalationsCount = (openEscalationRows.data ?? []).filter((row) =>
@@ -458,8 +489,7 @@ export async function getSupportOverviewData(): Promise<SupportOverview> {
 
   const avgResolutionMinutes = resolvedDurations.length
     ? Math.round(
-        resolvedDurations.reduce((sum, value) => sum + value, 0) /
-          resolvedDurations.length,
+        resolvedDurations.reduce((sum, value) => sum + value, 0) / resolvedDurations.length,
       )
     : null;
 
@@ -644,6 +674,8 @@ export async function persistTicketDraftArtifact(input: {
   citations: string[];
   missingInfo: string[];
   confidence: number;
+  suggestedStatus: string | null;
+  resolutionLikely: boolean;
   escalationRequired: boolean;
   escalationReason: string | null;
   sourceQuery: string;
@@ -668,7 +700,13 @@ export async function persistTicketDraftArtifact(input: {
       escalation_reason: input.escalationReason,
       source_query: input.sourceQuery,
       source_snapshot: input.sourceSnapshot,
-      analysis_snapshot: input.analysisSnapshot,
+      analysis_snapshot: {
+        ...input.analysisSnapshot,
+        member3_response: {
+          suggested_status: input.suggestedStatus,
+          resolution_likely: input.resolutionLikely,
+        },
+      },
       status: "generated",
       created_by_agent_id: agent.id,
       created_by_agent_name: agent.name,
@@ -687,6 +725,8 @@ export async function persistChatSuggestionArtifact(input: {
   citations: string[];
   missingInfo: string[];
   confidence: number;
+  suggestedStatus: string | null;
+  resolutionLikely: boolean;
   escalationRequired: boolean;
   escalationReason: string | null;
   sourceQuery: string;
@@ -710,7 +750,13 @@ export async function persistChatSuggestionArtifact(input: {
       escalation_reason: input.escalationReason,
       source_query: input.sourceQuery,
       source_snapshot: input.sourceSnapshot,
-      analysis_snapshot: input.analysisSnapshot,
+      analysis_snapshot: {
+        ...input.analysisSnapshot,
+        member3_response: {
+          suggested_status: input.suggestedStatus,
+          resolution_likely: input.resolutionLikely,
+        },
+      },
       status: "generated",
       created_by_agent_id: agent.id,
       created_by_agent_name: agent.name,
@@ -745,10 +791,7 @@ async function createFeedback(input: {
   unwrapError(error, "Failed to record feedback");
 }
 
-export async function saveTicketDraft(input: {
-  draftId: string;
-  editedReply: string;
-}) {
+export async function saveTicketDraft(input: { draftId: string; editedReply: string }) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ai_ticket_drafts")
@@ -771,10 +814,7 @@ export async function saveTicketDraft(input: {
   return serializeTicketDraft(data as Record<string, unknown>);
 }
 
-export async function approveTicketDraft(input: {
-  draftId: string;
-  editedReply: string;
-}) {
+export async function approveTicketDraft(input: { draftId: string; editedReply: string }) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ai_ticket_drafts")
@@ -797,10 +837,7 @@ export async function approveTicketDraft(input: {
   return serializeTicketDraft(data as Record<string, unknown>);
 }
 
-export async function rejectTicketDraft(input: {
-  draftId: string;
-  note?: string | null;
-}) {
+export async function rejectTicketDraft(input: { draftId: string; note?: string | null }) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ai_ticket_drafts")
@@ -841,6 +878,21 @@ export async function sendTicketReply(input: {
     throw new Error("Ticket not found");
   }
 
+  const { data: draftSnapshotRow, error: draftSnapshotError } = await supabase
+    .from("ai_ticket_drafts")
+    .select("*")
+    .eq("id", input.draftId)
+    .maybeSingle();
+
+  unwrapError(draftSnapshotError, "Failed to load ticket draft state before sending");
+  if (!draftSnapshotRow) {
+    throw new Error("Ticket draft not found");
+  }
+
+  const draftSnapshot = serializeTicketDraft(draftSnapshotRow as Record<string, unknown>);
+  const shouldResolve =
+    draftSnapshot.suggestedStatus?.toUpperCase() === "RESOLVED" || draftSnapshot.resolutionLikely;
+
   const ticketStatus = String((ticketRow as Record<string, unknown>).status ?? "");
   if (ticketStatus === "submitted") {
     await acceptTicketAssignment({
@@ -854,6 +906,7 @@ export async function sendTicketReply(input: {
     agentId: agent.id,
     agentName: agent.name,
     message: input.message,
+    status: shouldResolve ? "resolved" : undefined,
   });
 
   const { data: draftRow, error: draftError } = await supabase
@@ -879,10 +932,7 @@ export async function sendTicketReply(input: {
   return serializeTicketDraft(draftRow as Record<string, unknown>);
 }
 
-export async function acceptTicketCase(input: {
-  ticketId: string;
-  trackingCode: string;
-}) {
+export async function acceptTicketCase(input: { ticketId: string; trackingCode: string }) {
   const agent = getDefaultAgent();
   return acceptTicketAssignment({
     trackingCode: input.trackingCode,
@@ -943,10 +993,7 @@ export async function escalateTicketCase(input: {
   };
 }
 
-export async function saveChatSuggestion(input: {
-  suggestionId: string;
-  editedReply: string;
-}) {
+export async function saveChatSuggestion(input: { suggestionId: string; editedReply: string }) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ai_chat_suggestions")
@@ -969,10 +1016,7 @@ export async function saveChatSuggestion(input: {
   return serializeChatSuggestion(data as Record<string, unknown>);
 }
 
-export async function approveChatSuggestion(input: {
-  suggestionId: string;
-  editedReply: string;
-}) {
+export async function approveChatSuggestion(input: { suggestionId: string; editedReply: string }) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ai_chat_suggestions")
@@ -995,10 +1039,7 @@ export async function approveChatSuggestion(input: {
   return serializeChatSuggestion(data as Record<string, unknown>);
 }
 
-export async function rejectChatSuggestion(input: {
-  suggestionId: string;
-  note?: string | null;
-}) {
+export async function rejectChatSuggestion(input: { suggestionId: string; note?: string | null }) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ai_chat_suggestions")
@@ -1098,33 +1139,35 @@ export async function escalateChatCase(input: {
   const supabase = getSupabaseAdmin();
   const agent = getDefaultAgent();
 
-  const [{ data: escalationRow, error: escalationError }, { data: suggestionRow, error: suggestionError }] =
-    await Promise.all([
-      supabase
-        .from("escalations")
-        .insert({
-          session_id: input.sessionId,
-          source_type: "chat",
-          reason: input.reason,
-          target_team: input.targetTeam ?? null,
-          status: "open",
-          created_by_agent_id: agent.id,
-          created_by_agent_name: agent.name,
-        })
-        .select("*")
-        .single(),
-      supabase
-        .from("ai_chat_suggestions")
-        .update({
-          status: "escalated",
-          escalation_required: true,
-          escalation_reason: input.reason,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", input.suggestionId)
-        .select("*")
-        .single(),
-    ]);
+  const [
+    { data: escalationRow, error: escalationError },
+    { data: suggestionRow, error: suggestionError },
+  ] = await Promise.all([
+    supabase
+      .from("escalations")
+      .insert({
+        session_id: input.sessionId,
+        source_type: "chat",
+        reason: input.reason,
+        target_team: input.targetTeam ?? null,
+        status: "open",
+        created_by_agent_id: agent.id,
+        created_by_agent_name: agent.name,
+      })
+      .select("*")
+      .single(),
+    supabase
+      .from("ai_chat_suggestions")
+      .update({
+        status: "escalated",
+        escalation_required: true,
+        escalation_reason: input.reason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", input.suggestionId)
+      .select("*")
+      .single(),
+  ]);
 
   unwrapError(escalationError, "Failed to create chat escalation");
   unwrapError(suggestionError, "Failed to update chat suggestion escalation state");

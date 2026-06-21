@@ -3,8 +3,11 @@ import { createServerFn } from "@tanstack/react-start";
 import type {
   ChatCopilotResult,
   CitationSource,
+  KnowledgeSearchResult,
   TicketCopilotResult,
 } from "../copilot-types";
+import { getServerConfig } from "../config.server";
+import type { BackendTicketStatus, Member3HistoryItem, SupportMessage } from "../support-models";
 import {
   analyzeSupportText,
   createChatSuggestion,
@@ -16,10 +19,7 @@ import {
   searchKnowledge,
   uploadKnowledgeDocument,
 } from "./copilot.server";
-import {
-  persistChatSuggestionArtifact,
-  persistTicketDraftArtifact,
-} from "../support.server";
+import { persistChatSuggestionArtifact, persistTicketDraftArtifact } from "../support.server";
 
 type KnowledgeListInput = {
   sourceType?: string;
@@ -43,7 +43,8 @@ type TicketCopilotInput = {
   ticketId: string;
   trackingCode: string;
   subject: string;
-  customerMessage: string;
+  conversationHistory: SupportMessage[];
+  ticketStatus: BackendTicketStatus;
   channel?: string;
   customerPlan?: string;
   createdAt?: string;
@@ -51,8 +52,7 @@ type TicketCopilotInput = {
 
 type ChatCopilotInput = {
   conversationId: string;
-  conversationHistory: Array<{ sender: string; message: string }>;
-  latestMessage: string;
+  conversationHistory: SupportMessage[];
   knownDetails?: Record<string, unknown>;
   missingDetails?: string[];
   customerPlan?: string;
@@ -61,11 +61,7 @@ type ChatCopilotInput = {
 function inferCitationType(title: string, citation: string) {
   const haystack = `${title} ${citation}`.toLowerCase();
   if (haystack.includes("ticket")) return "past_ticket";
-  if (
-    haystack.includes("guide") ||
-    haystack.includes("faq") ||
-    haystack.includes("troubleshoot")
-  ) {
+  if (haystack.includes("guide") || haystack.includes("faq") || haystack.includes("troubleshoot")) {
     return "guide";
   }
   return "policy";
@@ -100,6 +96,44 @@ function buildKnowledgeQuery(category: string, segments: string[]) {
   }
 
   return uniqueSegments.join("\n\n");
+}
+
+function toMember3History(messages: SupportMessage[]): Member3HistoryItem[] {
+  return messages
+    .filter(
+      (message): message is SupportMessage & { from: "customer" | "agent" } =>
+        message.from === "customer" || message.from === "agent",
+    )
+    .map((message) => ({
+      sender: message.from,
+      message: message.text,
+      timestamp: message.at || undefined,
+      message_id: message.id || undefined,
+    }));
+}
+
+function getLatestCustomerHistoryItem(messages: SupportMessage[]) {
+  const history = toMember3History(messages);
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry.sender === "customer") return entry;
+  }
+  return null;
+}
+
+function getRetrievalMinScore() {
+  const configuredValue = Number(getServerConfig().copilotRetrievalMinScore ?? 0.75);
+  if (!Number.isFinite(configuredValue)) return 0.75;
+  return Math.min(Math.max(configuredValue, 0), 1);
+}
+
+function selectRetrievedResults(results: KnowledgeSearchResult[]) {
+  const filteredResults = results.filter((result) => result.score >= getRetrievalMinScore());
+  return filteredResults;
+}
+
+function logMember3Payload(endpoint: string, payload: Record<string, unknown>) {
+  console.info(`[member3] ${endpoint} payload\n${JSON.stringify(payload, null, 2)}`);
 }
 
 export const getKnowledgeDocuments = createServerFn({ method: "GET" })
@@ -145,34 +179,43 @@ export const removeKnowledgeSource = createServerFn({ method: "POST" })
 export const generateTicketCopilot = createServerFn({ method: "POST" })
   .validator((input: TicketCopilotInput) => input)
   .handler(async ({ data }) => {
+    const conversationHistory = toMember3History(data.conversationHistory);
+    const latestCustomerEntry = getLatestCustomerHistoryItem(data.conversationHistory);
+
+    if (!latestCustomerEntry) {
+      throw new Error("Ticket conversation does not contain a customer-authored message.");
+    }
+
     const analysis = await analyzeSupportText({
-      message: data.customerMessage,
+      message: latestCustomerEntry.message,
       ticketId: data.ticketId,
     });
 
     const searchQuery = buildKnowledgeQuery(analysis.category, [
       data.subject,
-      data.customerMessage,
+      latestCustomerEntry.message,
       analysis.sentiment,
     ]);
 
     const retrieval = await searchKnowledge({
       query: searchQuery,
       topK: 4,
-      filters: analysis.category
-        ? { category: analysis.category.toLowerCase() }
-        : undefined,
+      filters: analysis.category ? { category: analysis.category.toLowerCase() } : undefined,
     });
 
-    const retrievedContext = retrieval.results.map((result) => ({
+    const selectedResults = selectRetrievedResults(retrieval.results);
+
+    const retrievedContext = selectedResults.map((result) => ({
       source: result.title,
       section: result.section ?? undefined,
       text: result.text,
       score: result.score,
     }));
 
-    const draft = await createTicketDraft(data.ticketId, {
-      customer_message: data.customerMessage,
+    const member3Payload = {
+      conversation_history: conversationHistory,
+      latest_customer_message: latestCustomerEntry.message,
+      subject: data.subject,
       category: analysis.category,
       priority: analysis.priority,
       sentiment: analysis.sentiment,
@@ -181,8 +224,13 @@ export const generateTicketCopilot = createServerFn({ method: "POST" })
       channel: data.channel ?? "email",
       customer_plan: data.customerPlan ?? "standard",
       created_at: data.createdAt,
+      ticket_status: data.ticketStatus,
       retrieved_context: retrievedContext,
-    });
+    };
+
+    logMember3Payload(`/tickets/${data.ticketId}/draft`, member3Payload);
+
+    const draft = await createTicketDraft(data.ticketId, member3Payload);
 
     const persistedDraft = await persistTicketDraftArtifact({
       ticketId: data.ticketId,
@@ -192,17 +240,19 @@ export const generateTicketCopilot = createServerFn({ method: "POST" })
       citations: draft.citations,
       missingInfo: draft.missingInfo,
       confidence: draft.confidence,
+      suggestedStatus: draft.suggestedStatus,
+      resolutionLikely: draft.resolutionLikely,
       escalationRequired: draft.escalationRequired,
       escalationReason: draft.escalationReason,
       sourceQuery: searchQuery,
-      sourceSnapshot: retrieval.results.map(toCitationSource),
+      sourceSnapshot: selectedResults.map(toCitationSource),
       analysisSnapshot: analysis,
     });
 
     const result: TicketCopilotResult = {
       analysis,
       searchQuery,
-      sources: retrieval.results.map(toCitationSource),
+      sources: selectedResults.map(toCitationSource),
       draftId: persistedDraft.id,
       draftStatus: persistedDraft.status,
       draft,
@@ -214,35 +264,41 @@ export const generateTicketCopilot = createServerFn({ method: "POST" })
 export const generateChatCopilot = createServerFn({ method: "POST" })
   .validator((input: ChatCopilotInput) => input)
   .handler(async ({ data }) => {
+    const conversationHistory = toMember3History(data.conversationHistory);
+    const latestCustomerEntry = getLatestCustomerHistoryItem(data.conversationHistory);
+
+    if (!latestCustomerEntry) {
+      throw new Error("Chat conversation does not contain a customer-authored message.");
+    }
+
     const analysis = await analyzeSupportText({
-      message: data.latestMessage,
+      message: latestCustomerEntry.message,
       ticketId: data.conversationId,
     });
 
     const searchQuery = buildKnowledgeQuery(analysis.category, [
-      data.latestMessage,
+      latestCustomerEntry.message,
       analysis.sentiment,
-      data.conversationHistory.slice(-3).map((entry) => entry.message).join("\n"),
     ]);
 
     const retrieval = await searchKnowledge({
       query: searchQuery,
       topK: 4,
-      filters: analysis.category
-        ? { category: analysis.category.toLowerCase() }
-        : undefined,
+      filters: analysis.category ? { category: analysis.category.toLowerCase() } : undefined,
     });
 
-    const retrievedContext = retrieval.results.map((result) => ({
+    const selectedResults = selectRetrievedResults(retrieval.results);
+
+    const retrievedContext = selectedResults.map((result) => ({
       source: result.title,
       section: result.section ?? undefined,
       text: result.text,
       score: result.score,
     }));
 
-    const suggestion = await createChatSuggestion(data.conversationId, {
-      conversation_history: data.conversationHistory,
-      latest_message: data.latestMessage,
+    const member3Payload = {
+      conversation_history: conversationHistory,
+      latest_message: latestCustomerEntry.message,
       category: analysis.category,
       priority: analysis.priority,
       sentiment: analysis.sentiment,
@@ -251,7 +307,11 @@ export const generateChatCopilot = createServerFn({ method: "POST" })
       missing_details: data.missingDetails ?? [],
       customer_plan: data.customerPlan ?? "standard",
       retrieved_context: retrievedContext,
-    });
+    };
+
+    logMember3Payload(`/chat/conversations/${data.conversationId}/suggest`, member3Payload);
+
+    const suggestion = await createChatSuggestion(data.conversationId, member3Payload);
 
     const persistedSuggestion = await persistChatSuggestionArtifact({
       sessionId: data.conversationId,
@@ -260,17 +320,19 @@ export const generateChatCopilot = createServerFn({ method: "POST" })
       citations: suggestion.citations,
       missingInfo: suggestion.missingInfo,
       confidence: suggestion.confidence,
+      suggestedStatus: suggestion.suggestedStatus,
+      resolutionLikely: suggestion.resolutionLikely,
       escalationRequired: suggestion.escalationRequired,
       escalationReason: suggestion.escalationReason,
       sourceQuery: searchQuery,
-      sourceSnapshot: retrieval.results.map(toCitationSource),
+      sourceSnapshot: selectedResults.map(toCitationSource),
       analysisSnapshot: analysis,
     });
 
     const result: ChatCopilotResult = {
       analysis,
       searchQuery,
-      sources: retrieval.results.map(toCitationSource),
+      sources: selectedResults.map(toCitationSource),
       suggestionId: persistedSuggestion.id,
       suggestionStatus: persistedSuggestion.status,
       suggestion,

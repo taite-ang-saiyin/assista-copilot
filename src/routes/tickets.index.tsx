@@ -14,6 +14,20 @@ import { getSupportTickets } from "@/lib/api/support.functions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Filter, LoaderCircle, Search } from "lucide-react";
 
 export const Route = createFileRoute("/tickets/")({
@@ -26,6 +40,14 @@ const TABS = ["All", "AI drafted", "Needs human", "Escalated", "Resolved"] as co
 function TicketList() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("All");
   const [query, setQuery] = useState("");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [priorityFilter, setPriorityFilter] = useState<
+    "all" | "Low" | "Medium" | "High" | "Urgent"
+  >("all");
+  const [flagFilter, setFlagFilter] = useState<
+    "all" | "needs_review" | "security_issue" | "vip_customer" | "low_confidence"
+  >("all");
+  const [categoryFilter, setCategoryFilter] = useState("");
 
   const ticketsQuery = useQuery({
     queryKey: ["support-tickets"],
@@ -56,9 +78,44 @@ function TicketList() {
       ) {
         return false;
       }
+      if (priorityFilter !== "all" && ticket.priority !== priorityFilter) {
+        return false;
+      }
+      if (
+        flagFilter === "needs_review" &&
+        !ticket.flags.some((flag) =>
+          ["security_issue", "vip_customer", "low_confidence"].includes(flag),
+        )
+      ) {
+        return false;
+      }
+      if (
+        flagFilter !== "all" &&
+        flagFilter !== "needs_review" &&
+        !ticket.flags.includes(flagFilter)
+      ) {
+        return false;
+      }
+      if (
+        categoryFilter.trim() &&
+        !ticket.category.toLowerCase().includes(categoryFilter.trim().toLowerCase())
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [query, tab, ticketsQuery.data]);
+  }, [categoryFilter, flagFilter, priorityFilter, query, tab, ticketsQuery.data]);
+
+  const activeFilterCount =
+    Number(priorityFilter !== "all") +
+    Number(flagFilter !== "all") +
+    Number(categoryFilter.trim() !== "");
+
+  const resetAdvancedFilters = () => {
+    setPriorityFilter("all");
+    setFlagFilter("all");
+    setCategoryFilter("");
+  };
 
   return (
     <AppShell>
@@ -67,9 +124,9 @@ function TicketList() {
         subtitle="Supabase-backed ticket queue with persisted AI drafts."
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => setIsFilterOpen(true)}>
               <Filter className="mr-1.5 h-4 w-4" />
-              Filters
+              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
             </Button>
           </>
         }
@@ -175,6 +232,70 @@ function TicketList() {
           </CardContent>
         </Card>
       </div>
+
+      <Sheet open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>Ticket filters</SheetTitle>
+            <SheetDescription>
+              Narrow the queue beyond the primary status tabs and text search.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-6 space-y-5">
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">Priority</div>
+              <Select
+                value={priorityFilter}
+                onValueChange={(value) => setPriorityFilter(value as typeof priorityFilter)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All priorities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All priorities</SelectItem>
+                  <SelectItem value="Low">Low</SelectItem>
+                  <SelectItem value="Medium">Medium</SelectItem>
+                  <SelectItem value="High">High</SelectItem>
+                  <SelectItem value="Urgent">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">Risk / review</div>
+              <Select
+                value={flagFilter}
+                onValueChange={(value) => setFlagFilter(value as typeof flagFilter)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All tickets" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All tickets</SelectItem>
+                  <SelectItem value="needs_review">Needs review</SelectItem>
+                  <SelectItem value="security_issue">Security issue</SelectItem>
+                  <SelectItem value="vip_customer">VIP customer</SelectItem>
+                  <SelectItem value="low_confidence">Low confidence</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">Category</div>
+              <Input
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                placeholder="Billing, Security, Refund..."
+              />
+            </div>
+
+            <Button variant="outline" className="w-full" onClick={resetAdvancedFilters}>
+              Reset advanced filters
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </AppShell>
   );
 }

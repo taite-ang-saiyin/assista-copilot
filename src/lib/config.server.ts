@@ -19,8 +19,7 @@ import process from "node:process";
 export function getServerConfig() {
   return {
     nodeEnv: process.env.NODE_ENV,
-    supportBackendBaseUrl:
-      process.env.SUPPORT_BACKEND_BASE_URL ?? process.env.VITE_BACKEND_URL,
+    supportBackendBaseUrl: process.env.SUPPORT_BACKEND_BASE_URL ?? process.env.VITE_BACKEND_URL,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     defaultAgentId: process.env.DEFAULT_AGENT_ID,
@@ -30,5 +29,6 @@ export function getServerConfig() {
     member2ApiKey: process.env.MEMBER2_API_KEY,
     member3ApiBaseUrl: process.env.MEMBER3_API_BASE_URL,
     member4ApiBaseUrl: process.env.MEMBER4_API_BASE_URL,
+    copilotRetrievalMinScore: process.env.COPILOT_RETRIEVAL_MIN_SCORE,
   };
 }
